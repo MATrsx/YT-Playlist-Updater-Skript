@@ -6,6 +6,7 @@ import yt_dlp
 import subprocess
 from pathlib import Path
 import time
+import shutil
 
 # Konfiguration aus Umgebungsvariablen
 PLAYLIST_ID = os.getenv('YOUTUBE_PLAYLIST_ID', '').strip()
@@ -19,6 +20,15 @@ COOKIES_FILE = 'cookies.txt'
 
 # API URLs basierend auf Region
 PCLOUD_API_URL = 'https://eapi.pcloud.com' if PCLOUD_REGION == 'EU' else 'https://api.pcloud.com'
+
+def check_ffmpeg():
+    """Prüfe ob ffmpeg verfügbar ist"""
+    if not shutil.which('ffmpeg'):
+        print("❌ FEHLER: ffmpeg ist nicht installiert!")
+        print("   Installiere es mit: sudo apt-get install ffmpeg")
+        return False
+    print("✓ ffmpeg gefunden")
+    return True
 
 def load_downloaded_videos():
     """Lade Liste der bereits heruntergeladenen Videos"""
@@ -40,7 +50,7 @@ def setup_cookies():
         print("✓ YouTube Cookies geladen")
         return True
     else:
-        print("⚠️  Keine YouTube Cookies gefunden - Downloads könnten fehlschlagen")
+        print("⚠️  Keine YouTube Cookies gefunden")
         return False
 
 def get_playlist_videos():
@@ -48,15 +58,24 @@ def get_playlist_videos():
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
-        'force_generic_extractor': False
+        'force_generic_extractor': False,
+        'no_warnings': True
     }
+    
+    if os.path.exists(COOKIES_FILE):
+        ydl_opts['cookiefile'] = COOKIES_FILE
     
     playlist_url = f'https://www.youtube.com/playlist?list={PLAYLIST_ID}'
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(playlist_url, download=False)
-        if 'entries' in info:
-            return [(entry['id'], entry['title']) for entry in info['entries'] if entry]
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(playlist_url, download=False)
+            if 'entries' in info:
+                return [(entry['id'], entry['title']) for entry in info['entries'] if entry]
+    except Exception as e:
+        print(f"❌ Fehler beim Abrufen der Playlist: {e}")
+        return []
+    
     return []
 
 def download_video(video_id, max_retries=3):
@@ -66,71 +85,70 @@ def download_video(video_id, max_retries=3):
         try:
             print(f"  Versuch {attempt + 1}/{max_retries}...")
             
-            # Base ydl_opts
-            base_opts = {
+            # Optimierte yt-dlp Optionen
+            ydl_opts = {
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '192',
+                }],
                 'quiet': False,
                 'no_warnings': False,
+                'ignoreerrors': False,
+                # Erhöhe Timeout
+                'socket_timeout': 30,
+                # Retry bei Netzwerkfehlern
+                'retries': 3,
+                'fragment_retries': 3,
             }
             
             # Cookies hinzufügen falls vorhanden
             if os.path.exists(COOKIES_FILE):
-                base_opts['cookiefile'] = COOKIES_FILE
-            
-            # Versuch 1-2: Direkt als m4a herunterladen (Audio only)
-            if attempt < 2:
-                ydl_opts = {
-                    **base_opts,
-                    'format': 'bestaudio[ext=m4a]/bestaudio',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'm4a',
-                    }]
-                }
-            # Versuch 3: Als MP4 herunterladen und konvertieren
-            else:
-                print("  Fallback: Lade als MP4 herunter und konvertiere...")
-                ydl_opts = {
-                    **base_opts,
-                    'format': 'bestvideo+bestaudio/best'
-                }
+                ydl_opts['cookiefile'] = COOKIES_FILE
             
             video_url = f'https://www.youtube.com/watch?v={video_id}'
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
                 
-                # Prüfe welche Datei erstellt wurde
+                # Finde die heruntergeladene Datei
                 download_dir = Path('downloads')
+                m4a_file = download_dir / f'{video_id}.m4a'
+                
+                if m4a_file.exists():
+                    print(f"  ✓ Download erfolgreich: {m4a_file.name}")
+                    return str(m4a_file)
+                
+                # Falls m4a nicht existiert, suche nach anderen Formaten
                 possible_files = list(download_dir.glob(f'{video_id}.*'))
-                
                 if not possible_files:
-                    raise Exception("Keine Datei gefunden nach Download")
+                    raise Exception("Keine Datei nach Download gefunden")
                 
-                downloaded_file = str(possible_files[0])
+                downloaded_file = possible_files[0]
                 
-                # Wenn nicht m4a, konvertiere es
-                if not downloaded_file.endswith('.m4a'):
-                    print(f"  Konvertiere {Path(downloaded_file).suffix} zu m4a...")
-                    m4a_file = f'downloads/{video_id}.m4a'
+                # Konvertiere zu m4a falls nötig
+                if downloaded_file.suffix != '.m4a':
+                    print(f"  Konvertiere {downloaded_file.suffix} zu m4a...")
                     
                     result = subprocess.run([
-                        'ffmpeg', '-i', downloaded_file,
+                        'ffmpeg', '-i', str(downloaded_file),
                         '-c:a', 'aac', '-b:a', '192k',
-                        '-vn',  # Kein Video
-                        '-y',   # Überschreibe falls vorhanden
-                        m4a_file
-                    ], capture_output=True, text=True)
+                        '-vn',
+                        '-y',
+                        str(m4a_file)
+                    ], capture_output=True, text=True, timeout=300)
                     
                     if result.returncode != 0:
                         raise Exception(f"FFmpeg Fehler: {result.stderr}")
                     
                     # Lösche Original
-                    os.remove(downloaded_file)
+                    downloaded_file.unlink()
                     downloaded_file = m4a_file
                 
-                print(f"  ✓ Download erfolgreich: {Path(downloaded_file).name}")
-                return downloaded_file
+                print(f"  ✓ Download erfolgreich: {downloaded_file.name}")
+                return str(downloaded_file)
                 
         except Exception as e:
             print(f"  ✗ Versuch {attempt + 1} fehlgeschlagen: {e}")
@@ -139,7 +157,7 @@ def download_video(video_id, max_retries=3):
             download_dir = Path('downloads')
             for f in download_dir.glob(f'{video_id}.*'):
                 try:
-                    os.remove(f)
+                    f.unlink()
                 except:
                     pass
             
@@ -154,31 +172,20 @@ def pcloud_auth():
     """Authentifiziere bei PCloud"""
     url = f'{PCLOUD_API_URL}/userinfo'
     
-    # Bereinige Credentials von möglichen Whitespaces
-    username = PCLOUD_USER.strip()
-    password = PCLOUD_PASS.strip()
-    
     params = {
-        'username': username,
-        'password': password,
+        'username': PCLOUD_USER.strip(),
+        'password': PCLOUD_PASS.strip(),
         'getauth': 1
     }
     
-    print(f"  API URL: {url}")
-    print(f"  Username Länge: {len(username)}")
-    print(f"  Passwort Länge: {len(password)}")
-    
     try:
         response = requests.get(url, params=params, timeout=30)
-        print(f"  HTTP Status: {response.status_code}")
         data = response.json()
-        print(f"  Response: {data}")
         
         if data.get('result') == 0:
-            print(f"  ✓ Authentifizierung erfolgreich")
+            print(f"  ✓ PCloud Authentifizierung erfolgreich")
             return data['auth']
         else:
-            # Zeige detaillierten Fehler
             error_msg = data.get('error', 'Unbekannter Fehler')
             error_code = data.get('result', 'Unbekannt')
             raise Exception(f"PCloud Auth failed - Code: {error_code}, Error: {error_msg}")
@@ -193,8 +200,13 @@ def pcloud_create_folder(auth, folder_path):
         'path': folder_path
     }
     
-    response = requests.get(url, params=params)
-    return response.json()
+    response = requests.get(url, params=params, timeout=30)
+    result = response.json()
+    
+    if result.get('result') == 0:
+        print(f"  ✓ Ordner bereit: {folder_path}")
+    
+    return result
 
 def pcloud_upload(auth, local_file, remote_path):
     """Lade Datei zu PCloud hoch"""
@@ -208,29 +220,23 @@ def pcloud_upload(auth, local_file, remote_path):
     
     with open(local_file, 'rb') as f:
         files = {'file': f}
-        response = requests.post(url, params=params, files=files)
+        response = requests.post(url, params=params, files=files, timeout=300)
     
     return response.json()
 
 def main():
     print("🚀 Starte YouTube to PCloud Sync...")
     
-    # Debug: Zeige Umgebungsvariablen (ohne Passwort!)
-    print(f"📌 Debug Info:")
-    print(f"   PLAYLIST_ID vorhanden: {bool(PLAYLIST_ID)}")
-    print(f"   PLAYLIST_ID Länge: {len(PLAYLIST_ID) if PLAYLIST_ID else 0}")
-    print(f"   PCLOUD_USER vorhanden: {bool(PCLOUD_USER)}")
-    print(f"   PCLOUD_USER Wert: '{PCLOUD_USER}'")
-    print(f"   PCLOUD_USER Länge: {len(PCLOUD_USER) if PCLOUD_USER else 0}")
-    print(f"   PCLOUD_PASS vorhanden: {bool(PCLOUD_PASS)}")
-    print(f"   PCLOUD_PASS Länge: {len(PCLOUD_PASS) if PCLOUD_PASS else 0}")
-    print(f"   PCLOUD_REGION: '{PCLOUD_REGION}'")
-    print(f"   API URL: {PCLOUD_API_URL}")
-    print(f"   YOUTUBE_COOKIES vorhanden: {bool(YOUTUBE_COOKIES)}")
+    # Prüfe ob ffmpeg vorhanden ist
+    if not check_ffmpeg():
+        sys.exit(1)
     
     # Validiere Umgebungsvariablen
     if not all([PLAYLIST_ID, PCLOUD_USER, PCLOUD_PASS]):
         print("❌ Fehlende Umgebungsvariablen!")
+        print(f"   PLAYLIST_ID: {'✓' if PLAYLIST_ID else '✗'}")
+        print(f"   PCLOUD_USERNAME: {'✓' if PCLOUD_USER else '✗'}")
+        print(f"   PCLOUD_PASSWORD: {'✓' if PCLOUD_PASS else '✗'}")
         sys.exit(1)
     
     # Setup Cookies
@@ -243,6 +249,11 @@ def main():
     # Hole Playlist Videos
     print(f"🔍 Suche neue Videos in Playlist {PLAYLIST_ID}...")
     playlist_videos = get_playlist_videos()
+    
+    if not playlist_videos:
+        print("❌ Keine Videos in Playlist gefunden!")
+        sys.exit(1)
+    
     print(f"📺 {len(playlist_videos)} Videos in Playlist gefunden")
     
     # Finde neue Videos
@@ -261,29 +272,50 @@ def main():
     # Erstelle Zielordner
     pcloud_create_folder(auth, PCLOUD_FOLDER)
     
+    # Statistiken
+    success_count = 0
+    failed_videos = []
+    
     # Verarbeite neue Videos
-    for video_id, title in new_videos:
+    for i, (video_id, title) in enumerate(new_videos, 1):
         try:
-            print(f"\n📥 Lade herunter: {title}")
+            print(f"\n📥 [{i}/{len(new_videos)}] Lade herunter: {title}")
             local_file = download_video(video_id)
             
-            print(f"☁️ Lade hoch zu PCloud...")
+            print(f"☁️  Lade hoch zu PCloud...")
             result = pcloud_upload(auth, local_file, PCLOUD_FOLDER)
             
             if result.get('result') == 0:
                 print(f"✅ Erfolgreich: {title}")
                 save_downloaded_video(video_id)
+                success_count += 1
                 
                 # Lösche lokale Datei
-                os.remove(local_file)
+                try:
+                    os.remove(local_file)
+                except:
+                    pass
             else:
                 print(f"❌ Upload fehlgeschlagen: {result}")
+                failed_videos.append((title, "Upload fehlgeschlagen"))
                 
         except Exception as e:
             print(f"❌ Fehler bei {title}: {e}")
+            failed_videos.append((title, str(e)))
             continue
     
-    print("\n🎉 Sync abgeschlossen!")
+    # Zusammenfassung
+    print(f"\n{'='*60}")
+    print(f"🎉 Sync abgeschlossen!")
+    print(f"   ✅ Erfolgreich: {success_count}/{len(new_videos)}")
+    print(f"   ❌ Fehlgeschlagen: {len(failed_videos)}/{len(new_videos)}")
+    
+    if failed_videos:
+        print(f"\n⚠️  Fehlgeschlagene Videos:")
+        for title, error in failed_videos:
+            print(f"   - {title}: {error}")
+    
+    print(f"{'='*60}")
 
 if __name__ == '__main__':
     main()
