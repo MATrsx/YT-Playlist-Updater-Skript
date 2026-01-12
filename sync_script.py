@@ -11,7 +11,7 @@ import time
 PLAYLIST_ID = os.getenv('YOUTUBE_PLAYLIST_ID')
 PCLOUD_USER = os.getenv('PCLOUD_USERNAME')
 PCLOUD_PASS = os.getenv('PCLOUD_PASSWORD')
-PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/YouTube')
+PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/Meine Musik')
 DOWNLOADED_FILE = 'downloaded_videos.txt'
 
 def load_downloaded_videos():
