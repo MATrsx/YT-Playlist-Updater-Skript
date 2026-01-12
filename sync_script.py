@@ -126,7 +126,7 @@ def download_video(video_id, max_retries=3):
 
 def pcloud_auth():
     """Authentifiziere bei PCloud"""
-    url = 'https://api.pcloud.com/userinfo'
+    url = 'https://eapi.pcloud.com/userinfo'
     params = {
         'username': PCLOUD_USER,
         'password': PCLOUD_PASS,
@@ -143,7 +143,7 @@ def pcloud_auth():
 
 def pcloud_create_folder(auth, folder_path):
     """Erstelle Ordner in PCloud falls nicht vorhanden"""
-    url = 'https://api.pcloud.com/createfolderifnotexists'
+    url = 'https://eapi.pcloud.com/createfolderifnotexists'
     params = {
         'auth': auth,
         'path': folder_path
@@ -154,7 +154,7 @@ def pcloud_create_folder(auth, folder_path):
 
 def pcloud_upload(auth, local_file, remote_path):
     """Lade Datei zu PCloud hoch"""
-    url = 'https://api.pcloud.com/uploadfile'
+    url = 'https://eapi.pcloud.com/uploadfile'
     
     params = {
         'auth': auth,
