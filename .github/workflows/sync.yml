@@ -18,6 +18,27 @@ jobs:
       with:
         python-version: '3.10'
     
+    # Primär: Versuche aus Cache zu laden (schnell)
+    - name: Restore Cache
+      id: cache-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: downloaded_videos.txt
+        key: downloaded-videos-${{ github.run_id }}
+        restore-keys: |
+          downloaded-videos-
+    
+    # Fallback: Falls Cache leer, aus Git laden
+    - name: Use Git Version as Fallback
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      run: |
+        if [ -f downloaded_videos.txt ]; then
+          echo "✅ Verwende downloaded_videos.txt aus Git"
+        else
+          echo "ℹ️  Keine Historie gefunden - starte frisch"
+          touch downloaded_videos.txt
+        fi
+    
     - name: Install System Dependencies
       run: |
         sudo apt-get update
@@ -31,6 +52,15 @@ jobs:
     - name: Create Download Directory
       run: mkdir -p downloads
     
+    - name: Show Current Status
+      run: |
+        if [ -f downloaded_videos.txt ]; then
+          TOTAL=$(wc -l < downloaded_videos.txt)
+          echo "📊 Aktuell getrackte Videos: $TOTAL"
+        else
+          echo "📊 Keine Videos getrackt"
+        fi
+    
     - name: Run Sync Script
       env:
         YOUTUBE_PLAYLIST_ID: ${{ secrets.YOUTUBE_PLAYLIST_ID }}
@@ -41,10 +71,45 @@ jobs:
         PCLOUD_REGION: ${{ secrets.PCLOUD_REGION }}
       run: python sync_script.py
     
-    - name: Commit Downloaded Video IDs
+    # Speichere in Cache (immer, auch bei Fehler im Script)
+    - name: Save to Cache
+      if: always()
+      uses: actions/cache/save@v3
+      with:
+        path: downloaded_videos.txt
+        key: downloaded-videos-${{ github.run_id }}
+    
+    # Commit zu Git nur bei Änderungen (Backup + Transparenz)
+    - name: Commit to Git (Backup)
+      if: success()
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add downloaded_videos.txt || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "Update downloaded videos list"
-        git push || true
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        if [ -f downloaded_videos.txt ]; then
+          git add downloaded_videos.txt
+          
+          if git diff --staged --quiet; then
+            echo "ℹ️  Keine Änderungen - kein Commit nötig"
+          else
+            TOTAL=$(wc -l < downloaded_videos.txt)
+            git commit -m "📝 Update: $TOTAL Videos getrackt [$(date +'%Y-%m-%d %H:%M')]"
+            git push
+            echo "✅ Backup zu Git gepusht"
+          fi
+        fi
+    
+    - name: Final Statistics
+      if: always()
+      run: |
+        echo "═══════════════════════════════════════"
+        echo "📊 SYNC ZUSAMMENFASSUNG"
+        echo "═══════════════════════════════════════"
+        if [ -f downloaded_videos.txt ]; then
+          TOTAL=$(wc -l < downloaded_videos.txt)
+          echo "Gesamt getrackte Videos: $TOTAL"
+        else
+          echo "Keine Videos getrackt"
+        fi
+        echo "Cache Status: ${{ steps.cache-restore.outputs.cache-hit == 'true' && '✅ Aus Cache geladen' || '🔄 Neu erstellt' }}"
+        echo "═══════════════════════════════════════"

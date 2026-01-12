@@ -17,7 +17,7 @@ PCLOUD_USER = os.getenv('PCLOUD_USERNAME', '').strip()
 PCLOUD_PASS = os.getenv('PCLOUD_PASSWORD', '').strip()
 PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/YouTube').strip()
 PCLOUD_REGION = os.getenv('PCLOUD_REGION', 'EU').strip()
-YOUTUBE_COOKIES = os.getenv('YOUTUBE_COOKIES', '').strip()
+YOUTUBE_COOKIES = os.getenv('YOUTUBE_COOKIES', '').strip() # Go to edge, Login in Youtube and get cookies using "Cookies txt" extension. Then update GitHub secret
 DOWNLOADED_FILE = 'downloaded_videos.txt'
 COOKIES_FILE = 'cookies.txt'
 
@@ -42,139 +42,21 @@ def check_dependencies():
     
     return True
 
-def pcloud_list_files(auth, folder_path):
-    """Liste alle Dateien im PCloud Ordner und lade ihre Metadaten"""
-    if not folder_path.startswith('/'):
-        folder_path = '/' + folder_path
-    
-    url = f'{PCLOUD_API_URL}/listfolder'
-    params = {
-        'auth': auth,
-        'path': folder_path
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        result = response.json()
-        
-        if result.get('result') == 0:
-            files = []
-            if 'metadata' in result and 'contents' in result['metadata']:
-                for item in result['metadata']['contents']:
-                    if not item.get('isfolder', False):
-                        files.append({
-                            'name': item['name'],
-                            'fileid': item.get('fileid')
-                        })
-            return files
-        else:
-            print(f"  ⚠️  Fehler beim Auflisten: {result.get('error', 'Unbekannt')}")
-            return []
-    except Exception as e:
-        print(f"  ⚠️  Exception beim Auflisten: {e}")
-        return []
-
-def pcloud_download_file_metadata(auth, fileid, local_path):
-    """Lade Datei von PCloud herunter um Metadaten auszulesen"""
-    url = f'{PCLOUD_API_URL}/getfilelink'
-    params = {
-        'auth': auth,
-        'fileid': fileid
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        result = response.json()
-        
-        if result.get('result') == 0:
-            download_url = 'https://' + result['hosts'][0] + result['path']
-            
-            # Lade nur die ersten paar KB für Metadaten
-            headers = {'Range': 'bytes=0-65536'}
-            file_response = requests.get(download_url, headers=headers, timeout=30)
-            
-            with open(local_path, 'wb') as f:
-                f.write(file_response.content)
-            
-            return True
-        return False
-    except Exception as e:
-        return False
-
-def extract_video_id_from_m4a_metadata(file_path):
-    """Extrahiere Video-ID aus m4a Metadaten (URL Tag)"""
-    try:
-        audio = MP4(file_path)
-        
-        # Versuche URL Tag zu lesen
-        if '\xa9url' in audio:
-            url = audio['\xa9url'][0]
-            # Extrahiere Video-ID aus YouTube URL
-            match = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
-            if match:
-                return match.group(1)
-        
-        return None
-    except Exception as e:
-        return None
-
-def get_downloaded_videos_from_pcloud(auth, folder_path):
-    """Hole Liste der bereits in PCloud vorhandenen Videos durch Metadaten-Check"""
-    print("🔍 Prüfe vorhandene Dateien in PCloud...")
-    
-    files = pcloud_list_files(auth, folder_path)
-    downloaded_ids = set()
-    temp_dir = Path('temp_metadata')
-    temp_dir.mkdir(exist_ok=True)
-    
-    print(f"📋 Analysiere {len(files)} Dateien...")
-    
-    for i, file_info in enumerate(files, 1):
-        filename = file_info['name']
-        fileid = file_info['fileid']
-        
-        if not filename.endswith('.m4a'):
-            continue
-        
-        # Zeige Fortschritt nur alle 10 Dateien
-        if i % 10 == 0 or i == len(files):
-            print(f"  Fortschritt: {i}/{len(files)} Dateien geprüft...", end='\r')
-        
-        try:
-            temp_file = temp_dir / f'temp_{fileid}.m4a'
-            
-            # Lade Datei-Header für Metadaten
-            if pcloud_download_file_metadata(auth, fileid, temp_file):
-                video_id = extract_video_id_from_m4a_metadata(temp_file)
-                
-                if video_id:
-                    downloaded_ids.add(video_id)
-                
-                # Lösche Temp-Datei
-                temp_file.unlink()
-        except Exception as e:
-            continue
-    
-    # Cleanup
-    try:
-        shutil.rmtree(temp_dir)
-    except:
-        pass
-    
-    print(f"\n📋 {len(downloaded_ids)} Videos mit gültigen IDs in PCloud gefunden")
-    return downloaded_ids
-
 def load_downloaded_videos():
-    """Lade Liste der bereits heruntergeladenen Videos (Legacy, falls lokal verwendet)"""
+    """Lade Liste der bereits heruntergeladenen Videos aus Cache/Git"""
     if os.path.exists(DOWNLOADED_FILE):
         with open(DOWNLOADED_FILE, 'r') as f:
-            return set(line.strip() for line in f)
+            video_ids = set(line.strip() for line in f if line.strip())
+        print(f"📋 {len(video_ids)} Videos aus Cache/Git geladen")
+        return video_ids
+    print("📋 Keine Download-Historie gefunden - starte frisch")
     return set()
 
 def save_downloaded_video(video_id):
-    """Speichere Video ID als heruntergeladen (Legacy, falls lokal verwendet)"""
+    """Speichere Video ID als heruntergeladen"""
     with open(DOWNLOADED_FILE, 'a') as f:
         f.write(f"{video_id}\n")
+    print(f"  💾 Video ID gespeichert: {video_id}")
 
 def setup_cookies():
     """Erstelle Cookies-Datei aus Umgebungsvariable"""
@@ -317,9 +199,6 @@ def set_file_timestamps(m4a_file, info_json_path):
         
         # Setze die Timestamps (Unix: atime, mtime)
         os.utime(file_path, (modified_timestamp, modified_timestamp))
-        
-        # Für Creation Time auf Linux: verwende stat wenn verfügbar
-        # Auf Windows würde das automatisch funktionieren
         
         print(f"  ✓ Creation: {creation_time.strftime('%d.%m.%Y %H:%M')}")
         print(f"  ✓ Modified: {current_time.strftime('%d.%m.%Y %H:%M:%S')}")
@@ -545,6 +424,7 @@ def pcloud_upload(auth, local_file, remote_path):
 
 def main():
     print("🚀 Starte YouTube to PCloud Sync...")
+    print(f"📦 Verwende GitHub Cache System für Download-Historie")
     
     if not check_dependencies():
         sys.exit(1)
@@ -564,12 +444,8 @@ def main():
     # Erstelle Ordner
     pcloud_create_folder(auth, PCLOUD_FOLDER)
     
-    # Hole bereits hochgeladene Videos aus PCloud
-    downloaded = get_downloaded_videos_from_pcloud(auth, PCLOUD_FOLDER)
-    
-    # Fallback: Prüfe auch lokale Datei (für lokale Nutzung)
-    local_downloaded = load_downloaded_videos()
-    downloaded.update(local_downloaded)
+    # Lade bereits heruntergeladene Videos aus Cache/Git
+    downloaded = load_downloaded_videos()
     
     print(f"🔍 Suche neue Videos in Playlist {PLAYLIST_ID}...")
     playlist_videos = get_playlist_videos()
