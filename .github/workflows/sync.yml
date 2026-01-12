@@ -29,9 +29,11 @@ jobs:
     - name: Run Sync Script
       env:
         YOUTUBE_PLAYLIST_ID: ${{ secrets.YOUTUBE_PLAYLIST_ID }}
+        YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         PCLOUD_USERNAME: ${{ secrets.PCLOUD_USERNAME }}
         PCLOUD_PASSWORD: ${{ secrets.PCLOUD_PASSWORD }}
         PCLOUD_FOLDER: ${{ secrets.PCLOUD_FOLDER }}
+        PCLOUD_REGION: ${{ secrets.PCLOUD_REGION }}
       run: python sync_script.py
     
     - name: Commit Downloaded Video IDs

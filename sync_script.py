@@ -13,7 +13,9 @@ PCLOUD_USER = os.getenv('PCLOUD_USERNAME', '').strip()
 PCLOUD_PASS = os.getenv('PCLOUD_PASSWORD', '').strip()
 PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/YouTube').strip()
 PCLOUD_REGION = os.getenv('PCLOUD_REGION', 'EU').strip()
+YOUTUBE_COOKIES = os.getenv('YOUTUBE_COOKIES', '').strip()
 DOWNLOADED_FILE = 'downloaded_videos.txt'
+COOKIES_FILE = 'cookies.txt'
 
 # API URLs basierend auf Region
 PCLOUD_API_URL = 'https://eapi.pcloud.com' if PCLOUD_REGION == 'EU' else 'https://api.pcloud.com'
@@ -29,6 +31,17 @@ def save_downloaded_video(video_id):
     """Speichere Video ID als heruntergeladen"""
     with open(DOWNLOADED_FILE, 'a') as f:
         f.write(f"{video_id}\n")
+
+def setup_cookies():
+    """Erstelle Cookies-Datei aus Umgebungsvariable"""
+    if YOUTUBE_COOKIES:
+        with open(COOKIES_FILE, 'w') as f:
+            f.write(YOUTUBE_COOKIES)
+        print("✓ YouTube Cookies geladen")
+        return True
+    else:
+        print("⚠️  Keine YouTube Cookies gefunden - Downloads könnten fehlschlagen")
+        return False
 
 def get_playlist_videos():
     """Hole alle Video IDs aus der Playlist"""
@@ -53,12 +66,22 @@ def download_video(video_id, max_retries=3):
         try:
             print(f"  Versuch {attempt + 1}/{max_retries}...")
             
+            # Base ydl_opts
+            base_opts = {
+                'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'quiet': False,
+                'no_warnings': False,
+            }
+            
+            # Cookies hinzufügen falls vorhanden
+            if os.path.exists(COOKIES_FILE):
+                base_opts['cookiefile'] = COOKIES_FILE
+            
             # Versuch 1-2: Direkt als m4a herunterladen (Audio only)
             if attempt < 2:
                 ydl_opts = {
+                    **base_opts,
                     'format': 'bestaudio[ext=m4a]/bestaudio',
-                    'outtmpl': 'downloads/%(id)s.%(ext)s',
-                    'quiet': False,
                     'postprocessors': [{
                         'key': 'FFmpegExtractAudio',
                         'preferredcodec': 'm4a',
@@ -68,9 +91,8 @@ def download_video(video_id, max_retries=3):
             else:
                 print("  Fallback: Lade als MP4 herunter und konvertiere...")
                 ydl_opts = {
-                    'format': 'bestvideo+bestaudio/best',
-                    'outtmpl': 'downloads/%(id)s.%(ext)s',
-                    'quiet': False
+                    **base_opts,
+                    'format': 'bestvideo+bestaudio/best'
                 }
             
             video_url = f'https://www.youtube.com/watch?v={video_id}'
@@ -204,11 +226,15 @@ def main():
     print(f"   PCLOUD_PASS Länge: {len(PCLOUD_PASS) if PCLOUD_PASS else 0}")
     print(f"   PCLOUD_REGION: '{PCLOUD_REGION}'")
     print(f"   API URL: {PCLOUD_API_URL}")
+    print(f"   YOUTUBE_COOKIES vorhanden: {bool(YOUTUBE_COOKIES)}")
     
     # Validiere Umgebungsvariablen
     if not all([PLAYLIST_ID, PCLOUD_USER, PCLOUD_PASS]):
         print("❌ Fehlende Umgebungsvariablen!")
         sys.exit(1)
+    
+    # Setup Cookies
+    setup_cookies()
     
     # Lade bereits heruntergeladene Videos
     downloaded = load_downloaded_videos()
