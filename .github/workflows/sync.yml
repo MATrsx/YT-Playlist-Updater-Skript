@@ -5,6 +5,9 @@ on:
     - cron: '0 * * * *'  # Jede Stunde
   workflow_dispatch:  # Manuelles Starten ermöglichen
 
+permissions:
+  contents: write  # Erlaubt Git Push
+
 jobs:
   sync-videos:
     runs-on: ubuntu-latest
