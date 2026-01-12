@@ -26,7 +26,7 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yt-dlp requests
+        pip install yt-dlp requests mutagen
     
     - name: Create Download Directory
       run: mkdir -p downloads
