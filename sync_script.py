@@ -8,11 +8,15 @@ from pathlib import Path
 import time
 
 # Konfiguration aus Umgebungsvariablen
-PLAYLIST_ID = os.getenv('YOUTUBE_PLAYLIST_ID')
-PCLOUD_USER = os.getenv('PCLOUD_USERNAME')
-PCLOUD_PASS = os.getenv('PCLOUD_PASSWORD')
-PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/Meine Musik')
+PLAYLIST_ID = os.getenv('YOUTUBE_PLAYLIST_ID', '').strip()
+PCLOUD_USER = os.getenv('PCLOUD_USERNAME', '').strip()
+PCLOUD_PASS = os.getenv('PCLOUD_PASSWORD', '').strip()
+PCLOUD_FOLDER = os.getenv('PCLOUD_FOLDER', '/YouTube').strip()
+PCLOUD_REGION = os.getenv('PCLOUD_REGION', 'EU').strip()
 DOWNLOADED_FILE = 'downloaded_videos.txt'
+
+# API URLs basierend auf Region
+PCLOUD_API_URL = 'https://eapi.pcloud.com' if PCLOUD_REGION == 'EU' else 'https://api.pcloud.com'
 
 def load_downloaded_videos():
     """Lade Liste der bereits heruntergeladenen Videos"""
@@ -126,24 +130,42 @@ def download_video(video_id, max_retries=3):
 
 def pcloud_auth():
     """Authentifiziere bei PCloud"""
-    url = 'https://eapi.pcloud.com/userinfo'
+    url = f'{PCLOUD_API_URL}/userinfo'
+    
+    # Bereinige Credentials von möglichen Whitespaces
+    username = PCLOUD_USER.strip()
+    password = PCLOUD_PASS.strip()
+    
     params = {
-        'username': PCLOUD_USER,
-        'password': PCLOUD_PASS,
+        'username': username,
+        'password': password,
         'getauth': 1
     }
     
-    response = requests.get(url, params=params)
-    data = response.json()
+    print(f"  API URL: {url}")
+    print(f"  Username Länge: {len(username)}")
+    print(f"  Passwort Länge: {len(password)}")
     
-    if data.get('result') == 0:
-        return data['auth']
-    else:
-        raise Exception(f"PCloud Auth failed: {data}")
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        print(f"  HTTP Status: {response.status_code}")
+        data = response.json()
+        print(f"  Response: {data}")
+        
+        if data.get('result') == 0:
+            print(f"  ✓ Authentifizierung erfolgreich")
+            return data['auth']
+        else:
+            # Zeige detaillierten Fehler
+            error_msg = data.get('error', 'Unbekannter Fehler')
+            error_code = data.get('result', 'Unbekannt')
+            raise Exception(f"PCloud Auth failed - Code: {error_code}, Error: {error_msg}")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Netzwerk-Fehler bei PCloud Auth: {e}")
 
 def pcloud_create_folder(auth, folder_path):
     """Erstelle Ordner in PCloud falls nicht vorhanden"""
-    url = 'https://eapi.pcloud.com/createfolderifnotexists'
+    url = f'{PCLOUD_API_URL}/createfolderifnotexists'
     params = {
         'auth': auth,
         'path': folder_path
@@ -154,7 +176,7 @@ def pcloud_create_folder(auth, folder_path):
 
 def pcloud_upload(auth, local_file, remote_path):
     """Lade Datei zu PCloud hoch"""
-    url = 'https://eapi.pcloud.com/uploadfile'
+    url = f'{PCLOUD_API_URL}/uploadfile'
     
     params = {
         'auth': auth,
@@ -170,6 +192,18 @@ def pcloud_upload(auth, local_file, remote_path):
 
 def main():
     print("🚀 Starte YouTube to PCloud Sync...")
+    
+    # Debug: Zeige Umgebungsvariablen (ohne Passwort!)
+    print(f"📌 Debug Info:")
+    print(f"   PLAYLIST_ID vorhanden: {bool(PLAYLIST_ID)}")
+    print(f"   PLAYLIST_ID Länge: {len(PLAYLIST_ID) if PLAYLIST_ID else 0}")
+    print(f"   PCLOUD_USER vorhanden: {bool(PCLOUD_USER)}")
+    print(f"   PCLOUD_USER Wert: '{PCLOUD_USER}'")
+    print(f"   PCLOUD_USER Länge: {len(PCLOUD_USER) if PCLOUD_USER else 0}")
+    print(f"   PCLOUD_PASS vorhanden: {bool(PCLOUD_PASS)}")
+    print(f"   PCLOUD_PASS Länge: {len(PCLOUD_PASS) if PCLOUD_PASS else 0}")
+    print(f"   PCLOUD_REGION: '{PCLOUD_REGION}'")
+    print(f"   API URL: {PCLOUD_API_URL}")
     
     # Validiere Umgebungsvariablen
     if not all([PLAYLIST_ID, PCLOUD_USER, PCLOUD_PASS]):
