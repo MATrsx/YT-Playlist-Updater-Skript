@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 import time
 import shutil
+from urllib.parse import quote
 
 # Konfiguration aus Umgebungsvariablen
 PLAYLIST_ID = os.getenv('YOUTUBE_PLAYLIST_ID', '').strip()
@@ -193,36 +194,78 @@ def pcloud_auth():
         raise Exception(f"Netzwerk-Fehler bei PCloud Auth: {e}")
 
 def pcloud_create_folder(auth, folder_path):
-    """Erstelle Ordner in PCloud falls nicht vorhanden"""
-    url = f'{PCLOUD_API_URL}/createfolderifnotexists'
-    params = {
-        'auth': auth,
-        'path': folder_path
-    }
+    """Erstelle Ordner in PCloud falls nicht vorhanden (inkl. übergeordnete Ordner)"""
     
-    response = requests.get(url, params=params, timeout=30)
-    result = response.json()
+    # Bereinige Pfad
+    folder_path = folder_path.strip()
+    if not folder_path.startswith('/'):
+        folder_path = '/' + folder_path
     
-    if result.get('result') == 0:
-        print(f"  ✓ Ordner bereit: {folder_path}")
+    # Teile Pfad in Segmente (OHNE encoding hier, da wir den Original-Pfad brauchen)
+    parts = [p for p in folder_path.split('/') if p]
     
-    return result
+    # Erstelle jeden Ordner schrittweise
+    current_path = ''
+    for part in parts:
+        current_path += '/' + part
+        
+        url = f'{PCLOUD_API_URL}/createfolderifnotexists'
+        params = {
+            'auth': auth,
+            'path': current_path  # PCloud API akzeptiert den Pfad als Parameter, nicht in URL
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        result = response.json()
+        
+        # Error 2004 = "Folder already exists" ist OK
+        if result.get('result') not in [0, 2004]:
+            error = result.get('error', 'Unbekannter Fehler')
+            print(f"  ⚠️  Warnung beim Erstellen von '{current_path}': {error}")
+            print(f"      Response: {result}")
+        else:
+            print(f"  ✓ Ordner erstellt/gefunden: '{current_path}'")
+    
+    print(f"  ✓ Zielordner bereit: '{folder_path}'")
+    return {'result': 0}
 
 def pcloud_upload(auth, local_file, remote_path):
     """Lade Datei zu PCloud hoch"""
+    
+    # Stelle sicher dass der Pfad mit / beginnt
+    if not remote_path.startswith('/'):
+        remote_path = '/' + remote_path
+    
     url = f'{PCLOUD_API_URL}/uploadfile'
     
+    # PCloud erwartet den Pfad als Query-Parameter, nicht URL-encoded in der URL
     params = {
         'auth': auth,
-        'path': remote_path,
+        'path': remote_path,  # Wird automatisch von requests korrekt encoded
         'filename': os.path.basename(local_file)
     }
     
-    with open(local_file, 'rb') as f:
-        files = {'file': f}
-        response = requests.post(url, params=params, files=files, timeout=300)
-    
-    return response.json()
+    try:
+        print(f"    Uploade zu: '{remote_path}'")
+        print(f"    Dateiname: '{os.path.basename(local_file)}'")
+        
+        with open(local_file, 'rb') as f:
+            files = {'file': f}
+            response = requests.post(url, params=params, files=files, timeout=300)
+        
+        result = response.json()
+        
+        # Debug-Info bei Fehler
+        if result.get('result') != 0:
+            print(f"  ❌ PCloud Upload Fehler:")
+            print(f"     Error Code: {result.get('result')}")
+            print(f"     Error Message: {result.get('error')}")
+            print(f"     Full Response: {result}")
+        
+        return result
+    except Exception as e:
+        print(f"  ❌ Exception beim Upload: {e}")
+        return {'result': -1, 'error': str(e)}
 
 def main():
     print("🚀 Starte YouTube to PCloud Sync...")
