@@ -89,7 +89,7 @@ def download_video(video_id, max_retries=3):
             # Optimierte yt-dlp Optionen
             ydl_opts = {
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
-                'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'm4a',
