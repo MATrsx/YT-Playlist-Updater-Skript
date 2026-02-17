@@ -26,8 +26,8 @@ PCLOUD_API_URL = 'https://eapi.pcloud.com' if PCLOUD_REGION == 'EU' else 'https:
 
 # yt-dlp Basis-Optionen für 2026 YouTube-Kompatibilität
 YTDLP_BASE_OPTS = {
-    'js_runtimes': ['node'],          # Node.js für JS-Challenge-Lösung
-    'remote_components': ['ejs:github'],  # Challenge-Solver-Skript von GitHub
+    'js_runtimes': {'node': {}},          # Node.js für JS-Challenge-Lösung
+    'remote_components': {'ejs:github': {}},  # Challenge-Solver-Skript von GitHub
 }
 
 def check_dependencies():
