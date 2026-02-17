@@ -14,17 +14,22 @@ jobs:
     
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
+
+    - name: Setup Node.js (für yt-dlp JS-Challenge-Lösung)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
     
     # Primär: Versuche aus Cache zu laden (schnell)
     - name: Restore Cache
       id: cache-restore
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: downloaded_videos.txt
         key: downloaded-videos-${{ github.run_id }}
@@ -50,7 +55,15 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yt-dlp requests mutagen
+        pip install "yt-dlp[default]" requests mutagen
+
+    - name: Verify Dependencies
+      run: |
+        echo "🔍 Versionen:"
+        ffmpeg -version | head -1
+        node --version
+        python --version
+        yt-dlp --version
     
     - name: Create Download Directory
       run: mkdir -p downloads
@@ -77,7 +90,7 @@ jobs:
     # Speichere in Cache (immer, auch bei Fehler im Script)
     - name: Save to Cache
       if: always()
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: downloaded_videos.txt
         key: downloaded-videos-${{ github.run_id }}
