@@ -2,7 +2,7 @@ name: YouTube to PCloud Sync
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Jede Stunde
+    - cron: '0 6-22 * * *'  # Tagsüber: 7-23 Uhr MEZ (UTC+1) / 8-24 Uhr MESZ (UTC+2)
   workflow_dispatch:  # Manuelles Starten ermöglichen
 
 permissions:
@@ -25,6 +25,14 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+
+    # NEU: Python-Abhängigkeiten cachen → spart ~40-60s pro Run
+    - name: Cache Python Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: pip-
     
     # Primär: Versuche aus Cache zu laden (schnell)
     - name: Restore Cache
@@ -76,8 +84,50 @@ jobs:
         else
           echo "📊 Keine Videos getrackt"
         fi
-    
+
+    # NEU: Frühzeitig abbrechen wenn nichts zu tun → spart den kompletten Rest des Runs
+    - name: Check for new videos
+      id: check_new
+      env:
+        YOUTUBE_PLAYLIST_ID: ${{ secrets.YOUTUBE_PLAYLIST_ID }}
+        YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+      run: |
+        NEW_COUNT=$(python - <<'EOF'
+        import os, yt_dlp
+
+        playlist_id = os.getenv('YOUTUBE_PLAYLIST_ID', '').strip()
+        cookies_file = 'cookies.txt'
+
+        if os.getenv('YOUTUBE_COOKIES', '').strip():
+            with open(cookies_file, 'w') as f:
+                f.write(os.getenv('YOUTUBE_COOKIES'))
+
+        downloaded = set()
+        if os.path.exists('downloaded_videos.txt'):
+            with open('downloaded_videos.txt') as f:
+                downloaded = set(line.strip() for line in f if line.strip())
+
+        opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'ignoreerrors': True,
+        }
+        if os.path.exists(cookies_file):
+            opts['cookiefile'] = cookies_file
+
+        url = f'https://www.youtube.com/playlist?list={playlist_id}'
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            entries = info.get('entries', []) if info else []
+            new = [e for e in entries if e and e.get('id') and e['id'] not in downloaded]
+            print(len(new))
+        EOF
+        )
+        echo "new_count=$NEW_COUNT" >> $GITHUB_OUTPUT
+        echo "🔎 Neue Videos gefunden: $NEW_COUNT"
+
     - name: Run Sync Script
+      if: steps.check_new.outputs.new_count != '0'  # Überspringen wenn nichts neu
       env:
         YOUTUBE_PLAYLIST_ID: ${{ secrets.YOUTUBE_PLAYLIST_ID }}
         YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
@@ -127,5 +177,6 @@ jobs:
         else
           echo "Keine Videos getrackt"
         fi
+        echo "Neue Videos geprüft: ${{ steps.check_new.outputs.new_count }}"
         echo "Cache Status: ${{ steps.cache-restore.outputs.cache-hit == 'true' && '✅ Aus Cache geladen' || '🔄 Neu erstellt' }}"
         echo "═══════════════════════════════════════"
