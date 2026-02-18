@@ -429,11 +429,6 @@ def main():
 
     setup_cookies()
 
-    print("🔐 Authentifiziere bei PCloud...")
-    auth = pcloud_auth()
-
-    pcloud_create_folder(auth, PCLOUD_FOLDER)
-
     downloaded = load_downloaded_videos()
 
     print(f"🔍 Suche neue Videos in Playlist {PLAYLIST_ID}...")
@@ -445,13 +440,20 @@ def main():
 
     print(f"📺 {len(playlist_videos)} Videos in Playlist gefunden")
 
+    # NEU: Early Exit — PCloud Auth erst wenn wirklich nötig
     new_videos = [(vid, title) for vid, title in playlist_videos if vid not in downloaded]
 
     if not new_videos:
-        print("✅ Keine neuen Videos gefunden!")
-        return
+        print("✅ Keine neuen Videos gefunden! Beende ohne Upload.")
+        return  # <-- Beendet hier, kein PCloud-Login, kein weiterer Aufwand
 
     print(f"🆕 {len(new_videos)} neue Videos gefunden!")
+
+    # PCloud Auth erst jetzt (nur wenn tatsächlich etwas zu tun ist)
+    print("🔐 Authentifiziere bei PCloud...")
+    auth = pcloud_auth()
+
+    pcloud_create_folder(auth, PCLOUD_FOLDER)
 
     success_count = 0
     failed_videos = []
